@@ -1,0 +1,20 @@
+services:
+  pipeline:
+    build: .
+    image: neurivai-pipeline:latest
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    volumes:
+      # HOT model weights
+      - ./models:/app/models
+      # Input/output videos — drop your video here and update VIDEO_PATH
+      - ./test.mp4:/app/test.mp4
+      - ./output_annotated.mp4:/app/output_annotated.mp4
+      # HuggingFace cache so YOLOv8m isn't re-downloaded every run
+      - huggingface_cache:/root/.cache/huggingface
+    command: python track_video.py
+
+volumes:
+  huggingface_cache:

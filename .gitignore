@@ -1,0 +1,23 @@
+# Virtual environment
+NeurivAI/
+
+# Model weights (large files — mount as volume)
+models/
+
+# Videos
+*.mp4
+*.avi
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Ultralytics run outputs
+runs/
+
+# HuggingFace cache
+.cache/
+
+# OS
+.DS_Store
