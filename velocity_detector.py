@@ -1,76 +1,78 @@
+"""
+velocity_detector.py — Stage 2
+Z-score velocity anomaly detector on head keypoint centroids.
+Fixed camera: no ego-motion compensation needed.
+"""
+
+from __future__ import annotations
+from collections import deque
 import numpy as np
-from collections import defaultdict
+from head_tracker import HeadState
 
 
-class VelocityAnomalyDetector:
+class KeypointVelocityDetector:
     """
-    Tracks per-ID centroid displacement across frames.
-    A sudden spike in velocity (high z-score vs recent history)
-    indicates a physical impact even when boxes don't overlap.
+    Per-track rolling velocity baseline. Flags sudden displacement spikes.
+
+    velocity(t) = ||centroid(t) - centroid(t-1)||   [pixels/frame]
+    z(t) = |v(t) - mean(v_window)| / std(v_window)
+    Fires if z > z_thresh AND min_history frames seen.
     """
 
-    def __init__(self, window=8, z_thresh=3.0, min_history=5):
-        """
-        Args:
-            window      : number of past frames to keep per track
-            z_thresh    : z-score threshold to flag an anomaly
-            min_history : minimum positions before anomaly detection starts
-                          (prevents false positives on new track entries)
-        """
+    def __init__(
+        self,
+        window:      int   = 10,    # rolling baseline window (frames)
+        z_thresh:    float = 3.5,   # z-score threshold
+        min_history: int   = 6,     # frames needed before firing
+    ):
         self.window      = window
         self.z_thresh    = z_thresh
         self.min_history = min_history
-        self.history     = defaultdict(list)   # track_id → [(cx, cy), ...]
 
-    @staticmethod
-    def _centroid(box):
-        return ((box[0] + box[2]) / 2.0, (box[1] + box[3]) / 2.0)
+        # dict[track_id → deque of (centroid, velocity)]
+        self._centroids:  dict[int, deque] = {}
+        self._velocities: dict[int, deque] = {}
 
-    def update(self, detections):
+    def detect(self, states: list[HeadState]) -> list[dict]:
         """
-        Args:
-            detections: list of {"id": int, "box": [x1,y1,x2,y2], ...}
-        Returns:
-            list of dicts: {id, velocity, z_score}  — only anomalous tracks
+        Returns list of anomalous tracks:
+            id       : int
+            velocity : float  [px/frame]
+            z_score  : float
         """
-        anomalies = []
+        results = []
 
-        for d in detections:
-            tid = d["id"]
-            self.history[tid].append(self._centroid(d["box"]))
+        for hs in states:
+            tid = hs.track_id
 
-            # Keep only the last `window` positions
-            if len(self.history[tid]) > self.window:
-                self.history[tid] = self.history[tid][-self.window:]
+            if tid not in self._centroids:
+                self._centroids[tid]  = deque(maxlen=self.window + 1)
+                self._velocities[tid] = deque(maxlen=self.window)
 
-            hist = self.history[tid]
-            if len(hist) < self.min_history:
+            self._centroids[tid].append(hs.centroid.copy())
+
+            if len(self._centroids[tid]) < 2:
                 continue
 
-            # Frame-to-frame Euclidean displacement
-            velocities = [
-                np.hypot(hist[k][0] - hist[k-1][0], hist[k][1] - hist[k-1][1])
-                for k in range(1, len(hist))
-            ]
+            # latest velocity
+            v = float(np.linalg.norm(
+                self._centroids[tid][-1] - self._centroids[tid][-2]
+            ))
+            self._velocities[tid].append(v)
 
-            # Compare last velocity to the window's mean/std
-            baseline = velocities[:-1]
-            mean_v   = float(np.mean(baseline))
-            std_v    = float(np.std(baseline)) + 1e-6
-            z        = abs(velocities[-1] - mean_v) / std_v
+            if len(self._velocities[tid]) < self.min_history:
+                continue
+
+            vels = np.array(self._velocities[tid])
+            mu   = vels[:-1].mean()
+            sig  = vels[:-1].std() + 1e-6   # avoid /0
+            z    = abs(v - mu) / sig
 
             if z > self.z_thresh:
-                anomalies.append({
+                results.append({
                     "id":       tid,
-                    "velocity": round(velocities[-1], 3),
-                    "z_score":  round(z, 3),
+                    "velocity": round(v, 3),
+                    "z_score":  round(float(z), 3),
                 })
 
-        return anomalies
-
-    def reset(self, track_id=None):
-        """Clear history for a specific track or all tracks."""
-        if track_id is not None:
-            self.history.pop(track_id, None)
-        else:
-            self.history.clear()
+        return results

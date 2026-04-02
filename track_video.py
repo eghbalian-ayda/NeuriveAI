@@ -1,77 +1,286 @@
+"""
+track_video.py — Pipeline entry point
+
+Two-pass processing:
+  Pass 1 (fast) : YOLOv8-pose + 3 lightweight stages → find impact timestamps
+  Pass 2 (deep) : HybrIK on ±HALF_WINDOW frames per confirmed impact event
+
+Renders an annotated output video with:
+  - Head circles + keypoints + track IDs every frame
+  - Red flash overlay + banner on impact frames
+  - 2-second freeze on each impact moment
+
+Usage:
+    python track_video.py --video path/to/video.mp4 [--window 15] [--show]
+"""
+
+import argparse
+import json
 import cv2
-from helmet_tracker  import HelmetTracker
-from impact_detector import ImpactDetector
+import numpy as np
+from pathlib import Path
 
-VIDEO_PATH  = "/home/ayda/Documents/Githubs/competition/test.mp4"
-OUTPUT_PATH = "/home/ayda/Documents/Githubs/competition/output_annotated.mp4"
+from head_tracker            import HeadKeypointTracker, HeadState, KP_CONF_THRESH
+from proximity_detector      import ProximityDetector
+from velocity_detector       import KeypointVelocityDetector
+from skull_rotation_detector import SkullRotationDetector
+from impact_buffer           import ImpactBuffer, ImpactEvent
+from hybrik_retrospective    import HybrIKRetrospective
+from brain_injury_profiler   import BrainInjuryProfiler
 
-# ── Init ──────────────────────────────────────────────────────────────
-tracker   = HelmetTracker()
-impact    = ImpactDetector()
-frame_idx = 0
 
-# ── Video writer setup ────────────────────────────────────────────────
-cap     = cv2.VideoCapture(VIDEO_PATH)
-fps     = cap.get(cv2.CAP_PROP_FPS) or 30
-w       = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-h       = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-cap.release()
-writer  = cv2.VideoWriter(OUTPUT_PATH, cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
+HALF_WINDOW  = 15    # frames before/after impact for HybrIK (0.5s at 30fps)
+FREEZE_SECS  = 2.0   # how long to hold on the impact frame
 
-# ── Colours ───────────────────────────────────────────────────────────
-GREEN  = (0, 200, 0)
-RED    = (0, 0, 220)
-YELLOW = (0, 200, 255)
-WHITE  = (255, 255, 255)
-BLACK  = (0, 0, 0)
 
-def draw_label(img, text, x, y, bg_color, text_color=WHITE, scale=0.55, thickness=1):
-    """Draw a filled-background text label."""
-    font   = cv2.FONT_HERSHEY_SIMPLEX
-    (tw, th), baseline = cv2.getTextSize(text, font, scale, thickness)
-    cv2.rectangle(img, (x, y - th - 4), (x + tw + 4, y + baseline), bg_color, -1)
-    cv2.putText(img, text, (x + 2, y), font, scale, text_color, thickness, cv2.LINE_AA)
+# ── colours ───────────────────────────────────────────────────────────────────
+C_GREEN  = (0,   210,  60)
+C_RED    = (0,   30,  220)
+C_YELLOW = (0,   220, 255)
+C_CYAN   = (220, 220,   0)
+C_WHITE  = (255, 255, 255)
+C_BLACK  = (0,     0,   0)
+C_ORANGE = (0,   140, 255)
 
-# ── Main loop ─────────────────────────────────────────────────────────
-for frame, detections in tracker.track(VIDEO_PATH, show=False, save=False):
-    frame_idx += 1
-    events    = [e for e in impact.detect(frame, detections) if e["confidence"] >= 0.18]
-    vis       = frame.copy()
+KP_COLORS = [C_WHITE, C_CYAN, C_CYAN, C_YELLOW, C_YELLOW]  # nose, eyes, ears
 
-    # Build set of impacted IDs for quick lookup
-    impacted_ids = set()
-    for ev in events:
-        sid = str(ev["id"])
-        for d in detections:
-            if str(d["id"]) in sid.split("-"):
-                impacted_ids.add(d["id"])
 
-    # ── Draw helmet boxes ─────────────────────────────────────────────
-    for d in detections:
-        x1, y1, x2, y2 = [int(v) for v in d["box"]]
-        is_impact = d["id"] in impacted_ids
-        color     = RED if is_impact else GREEN
-        thick     = 3   if is_impact else 2
+def _label(img, text, x, y, bg, fg=C_WHITE, scale=0.55, thick=1):
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    (tw, th), bl = cv2.getTextSize(text, font, scale, thick)
+    cv2.rectangle(img, (x, y - th - 4), (x + tw + 6, y + bl + 2), bg, -1)
+    cv2.putText(img, text, (x + 3, y), font, scale, fg, thick, cv2.LINE_AA)
 
-        cv2.rectangle(vis, (x1, y1), (x2, y2), color, thick)
-        draw_label(vis, f"ID{d['id']} {d['conf']:.2f}", x1, y1 - 4, color)
 
-    # ── Draw impact event overlays ────────────────────────────────────
-    for i, ev in enumerate(events):
-        stages = "+".join(s.upper() for s in ev["stages"])
-        label  = f"IMPACT [{stages}]  conf={ev['confidence']:.2f}"
-        parts  = ", ".join(ev["parts"]) if ev["parts"] else ""
+def _draw_frame(frame: np.ndarray,
+                head_states: list[HeadState],
+                impact_ids: set[int],
+                frame_idx: int,
+                events_this_frame: list[ImpactEvent],
+                reports_by_tid: dict[int, dict]) -> np.ndarray:
+    """Render one annotated frame."""
+    vis = frame.copy()
 
-        # Stack event banners at top-left
-        y_base = 28 + i * 44
-        draw_label(vis, label, 8, y_base,      RED,    WHITE, scale=0.6, thickness=2)
-        if parts:
-            draw_label(vis, f"parts: {parts}", 8, y_base + 20, BLACK, YELLOW, scale=0.5)
+    # ── red vignette overlay on impact frames ─────────────────────────────
+    if impact_ids:
+        overlay = vis.copy()
+        h, w = vis.shape[:2]
+        # semi-transparent red border
+        border = int(min(h, w) * 0.06)
+        cv2.rectangle(overlay, (0, 0), (w, h), C_RED, border)
+        cv2.addWeighted(overlay, 0.55, vis, 0.45, 0, vis)
 
-    # ── Frame counter ─────────────────────────────────────────────────
-    draw_label(vis, f"frame {frame_idx}", w - 110, h - 8, BLACK, WHITE, scale=0.5)
+    # ── per-person head visualisation ────────────────────────────────────
+    for hs in head_states:
+        is_impact = hs.track_id in impact_ids
+        color     = C_RED if is_impact else C_GREEN
+        cx, cy    = int(hs.centroid[0]), int(hs.centroid[1])
+        r         = int(hs.radius_px)
 
-    writer.write(vis)
+        # head circle
+        cv2.circle(vis, (cx, cy), r, color, 3 if is_impact else 2)
+        # inner dot at centroid
+        cv2.circle(vis, (cx, cy), 3, color, -1)
 
-writer.release()
-print(f"\nAnnotated video saved to: {OUTPUT_PATH}")
+        # keypoints
+        for kp, kp_col in zip(hs.keypoints, KP_COLORS):
+            if kp[2] > KP_CONF_THRESH:
+                cv2.circle(vis, (int(kp[0]), int(kp[1])), 4, kp_col, -1)
+
+        # track ID label
+        id_text = f"T{hs.track_id}"
+        _label(vis, id_text, cx - r, cy - r - 18,
+               bg=color, fg=C_WHITE, scale=0.55, thick=2 if is_impact else 1)
+
+        # brain injury report badge (shown during impact frames)
+        rep = reports_by_tid.get(hs.track_id)
+        if is_impact and rep and "error" not in rep:
+            risk   = rep["risk_summary"]
+            omega  = rep["omega_peak_rad_s"]
+            bric   = rep["bric_r"]
+            badge  = f"w={omega:.1f}r/s  BrIC={bric:.2f}  {risk}"
+            b_col  = C_RED if risk == "HIGH" else C_ORANGE if risk == "ELEVATED" else C_GREEN
+            _label(vis, badge, cx - r, cy + r + 14,
+                   bg=b_col, fg=C_WHITE, scale=0.45, thick=1)
+
+    # ── impact event banners at top ───────────────────────────────────────
+    for i, ev in enumerate(events_this_frame):
+        stages = "+".join(s.upper()[:3] for s in ev.stages)
+        line1  = f"  IMPACT  tracks {ev.track_ids}  conf={ev.confidence:.2f}  [{stages}]  "
+        y_base = 38 + i * 52
+        _label(vis, line1, 8, y_base, bg=C_RED, fg=C_WHITE, scale=0.75, thick=2)
+
+    # ── frame counter ─────────────────────────────────────────────────────
+    h, w = vis.shape[:2]
+    _label(vis, f"frame {frame_idx:05d}", w - 130, h - 10,
+           bg=C_BLACK, fg=C_WHITE, scale=0.48)
+
+    return vis
+
+
+# ── main ──────────────────────────────────────────────────────────────────────
+
+def run(video_path: str, half_window: int = HALF_WINDOW, show: bool = False):
+
+    print(f"\n{'='*60}")
+    print(f"NeurivAI v2 — Head Impact Pipeline")
+    print(f"Video : {video_path}")
+    print(f"{'='*60}\n")
+
+    # read video metadata up front
+    cap0 = cv2.VideoCapture(video_path)
+    total_frames = int(cap0.get(cv2.CAP_PROP_FRAME_COUNT)) or 9999
+    src_fps      = cap0.get(cv2.CAP_PROP_FPS) or 30.0
+    src_w        = int(cap0.get(cv2.CAP_PROP_FRAME_WIDTH))
+    src_h        = int(cap0.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    cap0.release()
+
+    freeze_frames = int(round(src_fps * FREEZE_SECS))
+
+    # ── PASS 1: lightweight detection ─────────────────────────────────────────
+    print("[Pass 1] Running head tracking + impact detection...")
+
+    tracker   = HeadKeypointTracker(source=video_path, show=show,
+                                    buffer_frames=total_frames + 10)
+    proximity = ProximityDetector()
+    velocity  = KeypointVelocityDetector()
+    skull_rot = SkullRotationDetector(fps=src_fps)
+    imp_buf   = ImpactBuffer()
+
+    # store per-frame states for rendering pass
+    all_frame_states: dict[int, list[HeadState]] = {}
+
+    for frame_idx, frame, head_states in tracker.track():
+        if frame_idx == 0:
+            skull_rot.fps = tracker.fps
+
+        prox_hits  = proximity.detect(head_states)
+        vel_hits   = velocity.detect(head_states)
+        skull_hits = skull_rot.detect(head_states)
+
+        new_events = imp_buf.process_frame(
+            frame_idx, prox_hits, vel_hits, skull_hits
+        )
+        all_frame_states[frame_idx] = head_states
+
+        for ev in new_events:
+            print(
+                f"  [IMPACT DETECTED] frame={ev.frame_idx:05d} | "
+                f"tracks={ev.track_ids} | conf={ev.confidence:.3f} | "
+                f"stages={ev.stages}"
+            )
+
+    all_events = imp_buf.events
+    print(f"\n[Pass 1 complete] {len(all_events)} impact event(s) found.\n")
+
+    # ── PASS 2: HybrIK retrospective ──────────────────────────────────────────
+    reports_by_event: dict[int, dict[int, dict]] = {}   # frame_idx → tid → report
+
+    if all_events:
+        print("[Pass 2] Running HybrIK on impact windows...")
+        hybrik   = HybrIKRetrospective()
+        profiler = BrainInjuryProfiler()
+
+        for ev in all_events:
+            print(f"\n  Processing event @ frame {ev.frame_idx} "
+                  f"(tracks {ev.track_ids})...")
+            frame_window = tracker.get_frame_window(ev.frame_idx, half_window)
+            if not frame_window:
+                print("    [!] No buffered frames.")
+                continue
+
+            reports_by_event[ev.frame_idx] = {}
+            for tid in ev.track_ids:
+                rot_dict = hybrik.process_event(frame_window, tid, tracker)
+                if not rot_dict:
+                    print(f"    [!] No HybrIK output for track {tid}")
+                    continue
+                report = profiler.profile(rot_dict, tracker.fps, tid, ev.frame_idx)
+                reports_by_event[ev.frame_idx][tid] = report
+
+                if "error" in report:
+                    print(f"    track {tid}: {report['error']}")
+                else:
+                    print(
+                        f"    track {tid}: "
+                        f"omega_peak={report['omega_peak_rad_s']:.1f} rad/s | "
+                        f"BrIC_R={report['bric_r']:.3f} ({report['bric_r_risk']}) | "
+                        f"KLC={report['klc_rot_rad_s']:.1f} rad/s ({report['klc_risk']}) | "
+                        f"DAMAGE={report['damage']:.4f} ({report['damage_risk']}) | "
+                        f"RISK={report['risk_summary']}"
+                    )
+    else:
+        print("No impacts detected — skipping Pass 2.\n")
+
+    # ── RENDER annotated video ─────────────────────────────────────────────────
+    print("\n[Render] Writing annotated video...")
+
+    out_path = str(Path(video_path).with_suffix("")) + "_annotated.mp4"
+    writer   = cv2.VideoWriter(
+        out_path, cv2.VideoWriter_fourcc(*"mp4v"), src_fps, (src_w, src_h)
+    )
+
+    # build a set of impact frame indices → (impact_ids, events, reports)
+    impact_frame_map: dict[int, tuple[set, list, dict]] = {}
+    for ev in all_events:
+        reps = reports_by_event.get(ev.frame_idx, {})
+        impact_frame_map[ev.frame_idx] = (set(ev.track_ids), [ev], reps)
+
+    frame_buffer_dict = dict(tracker.frame_buffer)   # fidx → frame
+
+    for fidx in sorted(frame_buffer_dict.keys()):
+        frame      = frame_buffer_dict[fidx]
+        head_states = all_frame_states.get(fidx, [])
+
+        # check if this frame is within ±2 frames of any impact (for glow effect)
+        impact_ids = set()
+        events_now = []
+        reports_now: dict[int, dict] = {}
+        for ev in all_events:
+            if abs(fidx - ev.frame_idx) <= 2:
+                impact_ids |= set(ev.track_ids)
+                if fidx == ev.frame_idx:
+                    events_now.append(ev)
+                    reports_now = reports_by_event.get(ev.frame_idx, {})
+
+        vis = _draw_frame(frame, head_states, impact_ids, fidx, events_now, reports_now)
+        writer.write(vis)
+
+        # freeze on exact impact frame for 2 seconds
+        if fidx in impact_frame_map:
+            # render the freeze frame with a "FREEZE" timestamp indicator
+            freeze_vis = vis.copy()
+            h, w = freeze_vis.shape[:2]
+            _label(freeze_vis, "[ IMPACT MOMENT ]", w // 2 - 110, h - 10,
+                   bg=C_RED, fg=C_WHITE, scale=0.7, thick=2)
+            for _ in range(freeze_frames):
+                writer.write(freeze_vis)
+
+    writer.release()
+    print(f"[Render] Saved to: {out_path}")
+
+    # ── save JSON report ───────────────────────────────────────────────────────
+    all_reports = [r for tid_map in reports_by_event.values() for r in tid_map.values()]
+    json_path   = str(Path(video_path).with_suffix("")) + ".impact_report.json"
+    with open(json_path, "w") as f:
+        json.dump({
+            "events": [
+                {"frame": ev.frame_idx, "tracks": ev.track_ids,
+                 "confidence": ev.confidence, "stages": ev.stages,
+                 "details": ev.details}
+                for ev in all_events
+            ],
+            "profiles": all_reports,
+        }, f, indent=2)
+
+    print(f"[Done]   Report saved to: {json_path}\n")
+    return all_reports
+
+
+if __name__ == "__main__":
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--video",  required=True)
+    ap.add_argument("--window", type=int, default=HALF_WINDOW)
+    ap.add_argument("--show",   action="store_true")
+    args = ap.parse_args()
+    run(args.video, args.window, args.show)
