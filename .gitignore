@@ -4,9 +4,12 @@ NeurivAI/
 # Model weights (large files — mount as volume)
 models/
 
-# Videos
+# Videos (exclude large outputs, but track demo files)
 *.mp4
 *.avi
+!test.mp4
+!test_annotated.mp4
+!test_impact_moment.mp4
 
 # Python cache
 __pycache__/
