@@ -142,6 +142,9 @@ def _phong_sphere(img: np.ndarray,
 
 # ── resultant arrow (fade-able) ───────────────────────────────────────────────
 
+_ARROW_COLOR = (0, 255, 60)   # electric lime — vibrant against any sphere colour
+
+
 def _resultant_arrow(img: np.ndarray,
                      cx: int, cy: int, r: int,
                      omega_xy_unit: np.ndarray,
@@ -157,10 +160,12 @@ def _resultant_arrow(img: np.ndarray,
     ey = int(cy + dy * length)
 
     overlay = img.copy()
+    # thin dark shadow for contrast (2 px)
     cv2.arrowedLine(overlay, (cx, cy), (ex, ey),
-                    (10, 10, 10), 5, cv2.LINE_AA, tipLength=0.28)
+                    (5, 5, 5), 3, cv2.LINE_AA, tipLength=0.30)
+    # sharp 1-px vibrant arrow
     cv2.arrowedLine(overlay, (cx, cy), (ex, ey),
-                    (255, 255, 255), 2, cv2.LINE_AA, tipLength=0.28)
+                    _ARROW_COLOR, 1, cv2.LINE_AA, tipLength=0.30)
     cv2.addWeighted(overlay, global_alpha, img, 1.0 - global_alpha, 0, img)
 
 
