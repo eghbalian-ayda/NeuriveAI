@@ -1,10 +1,16 @@
+# syntax=docker/dockerfile:1
 # ── Stage 1: Build React frontend ─────────────────────────────────────────
 # Build context: repo root (/workspace/storage/NeuriveAI)
 FROM node:20-alpine AS frontend-build
 
 WORKDIR /frontend
 COPY web/frontend/package.json ./
-RUN npm install
+
+# Cache mount keeps the npm registry cache across builds.
+# First build downloads everything; subsequent builds reuse the cache.
+RUN --mount=type=cache,target=/root/.npm \
+    npm install
+
 COPY web/frontend/ ./
 RUN npm run build
 # Output: /frontend/dist/
@@ -16,7 +22,8 @@ FROM python:3.10-slim
 WORKDIR /app
 
 COPY web/backend/requirements-web.txt ./
-RUN pip install --no-cache-dir -r requirements-web.txt
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install -r requirements-web.txt
 
 COPY web/backend/main.py ./web/backend/main.py
 
