@@ -1,0 +1,30 @@
+services:
+  neurive-web:
+    build:
+      context: ..                        # repo root — Dockerfile can COPY any repo file
+      dockerfile: web/backend/Dockerfile # multi-stage: Node builds frontend, then CUDA runtime
+    image: neurive-web:latest
+    ports:
+      - "8000:8000"
+    environment:
+      - CUDA_VISIBLE_DEVICES=2
+      - PIPELINE_DIR=/app
+      - UPLOADS_DIR=/app/web/uploads
+    volumes:
+      # Persist uploaded videos and pipeline outputs across restarts
+      - neurive-uploads:/app/web/uploads
+      # Model weights — must exist on host at these paths (not in repo)
+      - /workspace/storage/NeuriveAI/models:/app/models:ro
+      # HybrIK source tree required by hybrik_retrospective.py
+      - /workspace/storage/HybrIK:/workspace/storage/HybrIK:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["2"]   # expose only GPU 2 to container
+              capabilities: [gpu]
+    restart: unless-stopped
+
+volumes:
+  neurive-uploads:
