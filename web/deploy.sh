@@ -22,6 +22,11 @@ CUDA_DEVICE="${CUDA_VISIBLE_DEVICES:-2}"
 # Python in the neuriv conda env
 PYTHON="/root/miniconda3/envs/neuriv/bin/python"
 
+# Bypass any corporate HTTP proxy for all local/internal traffic.
+# Add additional hostnames or CIDRs as needed (comma-separated, no spaces).
+export NO_PROXY="localhost,127.0.0.1,::1,host.containers.internal,0.0.0.0"
+export no_proxy="$NO_PROXY"
+
 # ── Colours ────────────────────────────────────────────────────────────────
 if [[ -t 1 ]]; then
   RED='\033[0;31m'; YELLOW='\033[1;33m'; GREEN='\033[0;32m'
@@ -59,7 +64,7 @@ wait_for_http() {
   local url="$1" label="$2" timeout="${3:-30}"
   local i=0
   echo -n "  Waiting for $label"
-  while ! curl -sf "$url" > /dev/null 2>&1; do
+  while ! curl -sf --noproxy '*' "$url" > /dev/null 2>&1; do
     sleep 1
     i=$((i + 1))
     echo -n "."
@@ -215,7 +220,7 @@ cmd_status() {
   if model_is_running; then
     local pid; pid=$(model_pid)
     echo -e "  ${GREEN}● running${RESET}  pid=$pid"
-    local health; health=$(curl -sf "http://localhost:$MODEL_SERVER_PORT/health" 2>/dev/null || echo "unreachable")
+    local health; health=$(curl -sf --noproxy '*' "http://localhost:$MODEL_SERVER_PORT/health" 2>/dev/null || echo "unreachable")
     echo "  health: $health"
   else
     echo -e "  ${RED}○ stopped${RESET}"
@@ -228,7 +233,7 @@ cmd_status() {
   container_status=$(podman-compose -f "$COMPOSE_FILE" ps 2>/dev/null || echo "")
   if echo "$container_status" | grep -q "Up\|running"; then
     echo -e "  ${GREEN}● running${RESET}"
-    local http_status; http_status=$(curl -so /dev/null -w "%{http_code}" "http://localhost:$BACKEND_PORT/" 2>/dev/null || echo "unreachable")
+    local http_status; http_status=$(curl -so /dev/null --noproxy '*' -w "%{http_code}" "http://localhost:$BACKEND_PORT/" 2>/dev/null || echo "unreachable")
     echo "  http: $http_status"
   else
     echo -e "  ${RED}○ stopped${RESET}"
@@ -242,7 +247,7 @@ cmd_health() {
 
   echo -n "  Model server  http://localhost:$MODEL_SERVER_PORT/health  "
   local ms_health
-  ms_health=$(curl -sf "http://localhost:$MODEL_SERVER_PORT/health" 2>/dev/null)
+  ms_health=$(curl -sf --noproxy '*' "http://localhost:$MODEL_SERVER_PORT/health" 2>/dev/null)
   if [[ -n "$ms_health" ]]; then
     echo -e "${GREEN}✔${RESET} $ms_health"
   else
@@ -251,7 +256,7 @@ cmd_health() {
 
   echo -n "  Web backend   http://localhost:$BACKEND_PORT/           "
   local be_status
-  be_status=$(curl -so /dev/null -w "%{http_code}" "http://localhost:$BACKEND_PORT/" 2>/dev/null || echo "000")
+  be_status=$(curl -so /dev/null --noproxy '*' -w "%{http_code}" "http://localhost:$BACKEND_PORT/" 2>/dev/null || echo "000")
   if [[ "$be_status" == "200" ]]; then
     echo -e "${GREEN}✔ HTTP $be_status${RESET}"
   else
@@ -261,7 +266,7 @@ cmd_health() {
   echo ""
   echo -n "  Demo endpoint http://localhost:$BACKEND_PORT/api/demo    "
   local demo
-  demo=$(curl -sf "http://localhost:$BACKEND_PORT/api/demo" 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(f\"events={len(d['report']['events'])} profiles={len(d['report']['profiles'])}\")" 2>/dev/null || echo "")
+  demo=$(curl -sf --noproxy '*' "http://localhost:$BACKEND_PORT/api/demo" 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(f\"events={len(d['report']['events'])} profiles={len(d['report']['profiles'])}\")" 2>/dev/null || echo "")
   if [[ -n "$demo" ]]; then
     echo -e "${GREEN}✔ $demo${RESET}"
   else
