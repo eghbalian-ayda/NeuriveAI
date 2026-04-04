@@ -61,7 +61,7 @@ wait_for_http() {
   echo -n "  Waiting for $label"
   while ! curl -sf "$url" > /dev/null 2>&1; do
     sleep 1
-    ((i++))
+    i=$((i + 1))
     echo -n "."
     if [[ $i -ge $timeout ]]; then
       echo ""
@@ -118,7 +118,7 @@ model_stop() {
   local i=0
   while kill -0 "$pid" 2>/dev/null; do
     sleep 1
-    ((i++))
+    i=$((i + 1))
     if [[ $i -ge 10 ]]; then
       warn "Forcing kill…"
       kill -9 "$pid" 2>/dev/null || true
