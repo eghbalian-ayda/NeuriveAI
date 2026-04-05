@@ -43,7 +43,7 @@ def _rot_to_rotvec(R: np.ndarray) -> np.ndarray:
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         log_R = logm(R)
-    rvec = np.array([log_R[2, 1], log_R[0, 2], log_R[1, 0]], dtype=np.float64)
+        rvec = np.array([log_R[2, 1], log_R[0, 2], log_R[1, 0]], dtype=np.float64)
     return rvec.real
 
 

@@ -11,17 +11,23 @@ HybrIK outputs:
 """
 
 from __future__ import annotations
+import os
 import sys
 from pathlib import Path
 import numpy as np
 import torch
 import cv2
 
-HYBRIK_ROOT = Path(__file__).parent.parent / "HybrIK"
+HYBRIK_ROOT = Path(__file__).parent.parent.parent / "HybrIK"
 sys.path.insert(0, str(HYBRIK_ROOT))
 
-from hybrik.models import builder as hybrik_builder
-from hybrik.utils.config import update_config
+# Defer HybrIK imports to runtime — allows Pass 1 to run without HybrIK installed
+try:
+    from hybrik.models import builder as hybrik_builder
+    from hybrik.utils.config import update_config
+    _HYBRIK_AVAILABLE = True
+except ImportError:
+    _HYBRIK_AVAILABLE = False
 
 HEAD_JOINT_IDX = 15   # SMPL 24-joint skeleton: joint 15 = head
 
@@ -37,6 +43,12 @@ class HybrIKRetrospective:
         cfg_file: str = None,
         device: str = None,
     ):
+        if not _HYBRIK_AVAILABLE:
+            raise RuntimeError(
+                "HybrIK is not installed. Clone and install it:\n"
+                "  git clone https://github.com/Jeff-sjtu/HybrIK.git ../HybrIK\n"
+                "  cd ../HybrIK && pip install -e ."
+            )
         if device is None:
             device = "cuda" if torch.cuda.is_available() else "cpu"
         self.device = device
@@ -47,10 +59,26 @@ class HybrIKRetrospective:
                 "256x192_adam_lr1e-3-hrw48_cam_2x_w_pw3d_3dhp.yaml"
             )
 
-        cfg = update_config(cfg_file)
-        self.model = hybrik_builder.build_sppe(cfg.MODEL)
+        # HybrIK uses relative paths internally — must run from its root
+        _orig_cwd = os.getcwd()
+        os.chdir(str(HYBRIK_ROOT))
+        try:
+            cfg = update_config(cfg_file)
+            self.model = hybrik_builder.build_sppe(cfg.MODEL)
+        finally:
+            os.chdir(_orig_cwd)
 
-        ckpt_path  = Path(__file__).parent / ckpt
+        # search for the checkpoint: project-relative, then HYBRIK_ROOT variants
+        ckpt_path = Path(_orig_cwd) / ckpt
+        if not ckpt_path.exists():
+            for candidate in [
+                HYBRIK_ROOT / "hybrik" / "models" / Path(ckpt).name,
+                HYBRIK_ROOT / "hybrik" / "models" / "pretrained_hrnet.pth",
+                HYBRIK_ROOT / "pretrained_models" / "hybrik_hrnet.pth",
+            ]:
+                if candidate.exists():
+                    ckpt_path = candidate
+                    break
         state      = torch.load(str(ckpt_path), map_location=device)
         state_dict = state.get("model", state.get("state_dict", state))
         self.model.load_state_dict(state_dict, strict=False)

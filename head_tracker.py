@@ -1,11 +1,13 @@
 """
-head_tracker.py — Stage 0
+head_tracker.py — Stage 0a
+
 Multi-person head keypoint tracker using YOLOv8x-pose + ByteTrack.
-Maintains rolling frame + keypoint buffers for retrospective HybrIK pass.
+Now depth-aware: HeadState includes a relative depth value sampled
+from the Depth Anything V2 depth map at each head centroid.
 """
 
 from __future__ import annotations
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from collections import deque
 import cv2
 import numpy as np
@@ -29,10 +31,11 @@ class HeadState:
     """All head information for a single person in a single frame."""
     track_id:   int
     frame_idx:  int
-    centroid:   np.ndarray          # (2,) [cx, cy] in pixels
-    radius_px:  float               # head radius proxy in pixels
-    keypoints:  np.ndarray          # (5, 3) [x, y, conf] for HEAD_KP_INDICES
-    body_box:   np.ndarray          # (4,) [x1,y1,x2,y2] full body bbox for HybrIK crop
+    centroid:   np.ndarray   # (2,) [cx, cy] pixels
+    radius_px:  float
+    keypoints:  np.ndarray   # (5, 3) [x, y, conf]
+    body_box:   np.ndarray   # (4,) [x1,y1,x2,y2]
+    depth:      float = 0.5  # ← NEW: relative depth [0=far, 1=close]
 
 
 class HeadKeypointTracker:
@@ -109,67 +112,81 @@ class HeadKeypointTracker:
             frame_idx = frame_idx,
             centroid  = centroid,
             radius_px = radius_px,
-            keypoints = head_kps,          # (5, 3)
+            keypoints = head_kps,
             body_box  = body_box,
+            depth     = 0.5,   # filled in by track() after depth estimation
         )
 
     # ── main generator ─────────────────────────────────────────────────────────
 
-    def track(self):
+    def track(self, depth_estimator=None):
         """
         Generator — yields (frame_idx, frame_bgr, list[HeadState]) per frame.
-        Also populates self.frame_buffer and self.kp_history.
+
+        Parameters
+        ----------
+        depth_estimator : DepthEstimator | None
+            If provided, depth_estimator.estimate_frame() is called each frame
+            and HeadState.depth is populated by sampling the result.
+            If None, all HeadState.depth values default to 0.5 (no gating).
         """
         cap = cv2.VideoCapture(self.source)
         if not cap.isOpened():
             raise RuntimeError(f"Cannot open: {self.source}")
-
         self.fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
 
         while True:
             ret, frame = cap.read()
             if not ret:
                 break
-
-            # buffer raw frame for HybrIK retrospective pass
             self.frame_buffer.append((self._frame_idx, frame.copy()))
 
-            # run YOLOv8-pose with ByteTrack
+            # ── Stage 0b: depth estimation ───────────────────────────────
+            # Run before YOLO so depth values are ready for HeadState
+            if depth_estimator is not None:
+                depth_estimator.estimate_frame(frame)
+                # temporary debug
+                if self._frame_idx % 30 == 0:
+                    print(f"[DEPTH] frame {self._frame_idx} — "
+                          f"depth map min={depth_estimator._last_depth.min():.3f} "
+                          f"max={depth_estimator._last_depth.max():.3f} "
+                          f"mean={depth_estimator._last_depth.mean():.3f}")
+
+            # ── Stage 0a: pose detection + tracking ───────────────────────
             results = self._model.track(
-                frame,
-                persist=True,
-                tracker="bytetrack.yaml",
-                conf=self.det_conf,
-                verbose=False,
-                classes=[0],    # person only
+                frame, persist=True, tracker="bytetrack.yaml",
+                conf=self.det_conf, verbose=False, classes=[0],
             )[0]
 
             head_states: list[HeadState] = []
 
             if results.keypoints is not None and results.boxes.id is not None:
-                kps_all   = results.keypoints.data.cpu().numpy()   # (N, 17, 3)
+                kps_all   = results.keypoints.data.cpu().numpy()
                 ids_all   = results.boxes.id.cpu().numpy().astype(int)
-                boxes_all = results.boxes.xyxy.cpu().numpy()        # (N, 4)
+                boxes_all = results.boxes.xyxy.cpu().numpy()
 
-                for i, (tid, kps, box) in enumerate(
-                    zip(ids_all, kps_all, boxes_all)
-                ):
+                for tid, kps, box in zip(ids_all, kps_all, boxes_all):
                     hs = self._extract_head_state(
                         int(tid), self._frame_idx, kps, box, self.kp_conf
                     )
                     if hs is None:
                         continue
 
-                    head_states.append(hs)
+                    # populate depth from cached depth map
+                    if depth_estimator is not None:
+                        hs.depth = depth_estimator.head_depth(hs.centroid)
+                        print(f"[DEPTH] frame {self._frame_idx} track {int(tid)} "
+                              f"centroid=({hs.centroid[0]:.0f},{hs.centroid[1]:.0f}) "
+                              f"depth={hs.depth:.3f}")
 
-                    # accumulate keypoint history
+                    head_states.append(hs)
                     if tid not in self.kp_history:
                         self.kp_history[tid] = []
                     self.kp_history[tid].append(hs)
 
             if self.show:
                 _draw_heads(frame, head_states)
-                cv2.imshow("Head Tracker", frame)
+                cv2.imshow("NeurivAI — Head Tracker", frame)
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     break
 
@@ -195,14 +212,10 @@ class HeadKeypointTracker:
         return sorted(result, key=lambda x: x[0])
 
 
-def _draw_heads(frame: np.ndarray, states: list[HeadState]) -> None:
-    """Debug visualisation — draw head centroids and keypoints."""
+def _draw_heads(frame, states):
     for hs in states:
         cx, cy = int(hs.centroid[0]), int(hs.centroid[1])
-        r = int(hs.radius_px)
-        cv2.circle(frame, (cx, cy), r, (0, 255, 0), 2)
-        cv2.putText(frame, str(hs.track_id), (cx - 10, cy - r - 5),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
-        for kp in hs.keypoints:
-            if kp[2] > KP_CONF_THRESH:
-                cv2.circle(frame, (int(kp[0]), int(kp[1])), 3, (255, 0, 0), -1)
+        cv2.circle(frame, (cx, cy), int(hs.radius_px), (0, 255, 0), 2)
+        cv2.putText(frame, f"#{hs.track_id} d={hs.depth:.2f}",
+                    (cx - 10, cy - int(hs.radius_px) - 5),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 255), 1)
