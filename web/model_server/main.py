@@ -213,35 +213,31 @@ async def get_results(job_id: str):
     return {"fps": fps, "total_frames": total_frames, "report": report}
 
 
-@app.get("/demo")
-async def load_demo():
-    report_path = PIPELINE_DIR / f"{DEMO_STEM}.impact_report.json"
+@app.post("/demo/run")
+async def run_demo():
+    """Queue the demo video through the full pipeline (same as a real upload)."""
     video_path = PIPELINE_DIR / f"{DEMO_STEM}.mp4"
+    if not video_path.exists():
+        raise HTTPException(status_code=404, detail=f"Demo video not found: {video_path}")
 
-    if not report_path.exists():
-        raise HTTPException(status_code=404, detail="Demo report not found on host")
+    # If already running, return the existing job rather than starting a second pipeline
+    existing = jobs.get("demo")
+    if existing and existing["stage"] not in ("complete", "error"):
+        return {"job_id": "demo"}
 
-    async with aiofiles.open(report_path) as f:
-        report = json.loads(await f.read())
-
-    fps, total_frames = _get_video_meta(video_path)
-
-    # Register demo job so the Docker backend can serve its video files
     jobs["demo"] = {
-        "stage": "complete",
-        "progress": 100,
-        "log": ["Demo mode"],
+        "stage": "pass1",
+        "progress": 5,
+        "log": [f"Starting demo pipeline for {DEMO_STEM}"],
         "job_dir": PIPELINE_DIR,
         "video_stem": DEMO_STEM,
         "error": None,
     }
 
-    return {
-        "job_id": "demo",
-        "fps": fps,
-        "total_frames": total_frames,
-        "report": report,
-    }
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(executor, _run_pipeline, "demo")
+
+    return {"job_id": "demo"}
 
 
 if __name__ == "__main__":

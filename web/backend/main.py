@@ -27,6 +27,10 @@ MODEL_SERVER_URL = os.getenv("MODEL_SERVER_URL", "http://localhost:8001")
 PIPELINE_MOUNT = Path(os.getenv("PIPELINE_DIR", str(Path(__file__).parent.parent.parent.resolve())))
 DEMO_STEM = "grok-video-4fa879d0-7052-400c-9aed-efb888d9579e"
 
+# HUD overlay shown on impact freeze — off by default until polished.
+# Set env var SHOW_IMPACT_HUD=true or flip this constant to re-enable.
+SHOW_IMPACT_HUD: bool = os.getenv("SHOW_IMPACT_HUD", "false").lower() == "true"
+
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
 # ── App ────────────────────────────────────────────────────────────────────
@@ -94,6 +98,12 @@ def _resolve_video_path(job_id: str, stem_suffix: str) -> Path:
     else:
         name = f"original{stem_suffix}.mp4"
         return UPLOADS_DIR / job_id / name
+
+
+# ── API: Config ───────────────────────────────────────────────────────────
+@app.get("/api/config")
+def get_config():
+    return {"showImpactHud": SHOW_IMPACT_HUD}
 
 
 # ── API: Upload ────────────────────────────────────────────────────────────
@@ -165,12 +175,12 @@ async def proxy_results(job_id: str):
         raise HTTPException(status_code=502, detail=f"Model server unreachable: {e}")
 
 
-# ── API: Demo (proxied) ────────────────────────────────────────────────────
-@app.get("/api/demo")
-async def proxy_demo():
+# ── API: Demo — run pipeline (proxied) ────────────────────────────────────
+@app.post("/api/demo/run")
+async def proxy_demo_run():
     try:
         async with httpx.AsyncClient() as client:
-            r = await client.get(f"{MODEL_SERVER_URL}/demo", timeout=10)
+            r = await client.post(f"{MODEL_SERVER_URL}/demo/run", timeout=10)
             r.raise_for_status()
             return r.json()
     except httpx.HTTPError as e:
@@ -213,6 +223,10 @@ if _assets_dir.exists():
 async def serve_spa(full_path: str):
     if full_path.startswith("api/"):
         raise HTTPException(status_code=404)
+    # Serve static files from the dist directory (e.g. brain_regions.json, favicons)
+    static_file = STATIC_DIR / full_path
+    if static_file.exists() and static_file.is_file():
+        return FileResponse(str(static_file))
     index = STATIC_DIR / "index.html"
     if index.exists():
         return HTMLResponse(index.read_text())

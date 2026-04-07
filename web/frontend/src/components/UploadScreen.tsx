@@ -1,13 +1,11 @@
 import { useRef, useState } from 'react'
-import { Upload, Zap } from 'lucide-react'
-import type { ResultsData } from '@/types/impact'
+import { Upload } from 'lucide-react'
 
 interface Props {
   onUploaded: (jobId: string) => void
-  onDemoLoaded: (data: ResultsData, jobId: string) => void
 }
 
-export default function UploadScreen({ onUploaded, onDemoLoaded }: Props) {
+export default function UploadScreen({ onUploaded }: Props) {
   const [dragOver, setDragOver] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [loadingDemo, setLoadingDemo] = useState(false)
@@ -34,13 +32,10 @@ export default function UploadScreen({ onUploaded, onDemoLoaded }: Props) {
     setLoadingDemo(true)
     setError(null)
     try {
-      const res = await fetch('/api/demo')
-      if (!res.ok) throw new Error('Demo data not available')
-      const data = await res.json()
-      onDemoLoaded(
-        { fps: data.fps, total_frames: data.total_frames, report: data.report },
-        data.job_id,
-      )
+      const res = await fetch('/api/demo/run', { method: 'POST' })
+      if (!res.ok) throw new Error('Could not start demo pipeline')
+      const { job_id } = await res.json()
+      onUploaded(job_id)
     } catch (e) {
       setError(String(e))
       setLoadingDemo(false)
@@ -62,17 +57,15 @@ export default function UploadScreen({ onUploaded, onDemoLoaded }: Props) {
   const busy = uploading || loadingDemo
 
   return (
-    <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-8">
+    <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-8">
       {/* Branding */}
       <div className="mb-12 text-center">
         <div className="flex items-center justify-center gap-3 mb-3">
-          <div className="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center">
-            <Zap className="w-6 h-6 text-white" />
-          </div>
-          <h1 className="text-4xl font-bold text-white tracking-tight">NeuriveAI</h1>
+          <img src="/logo.png" alt="NeuriveAI logo" className="w-12 h-12 sm:w-20 sm:h-20 object-contain" />
+          <h1 className="text-4xl sm:text-6xl font-bold text-slate-900 tracking-tight">NeuriveAI</h1>
         </div>
-        <p className="text-slate-400 text-lg">Ordinary cameras. Extraordinary protection.</p>
-        <p className="text-slate-600 text-sm mt-1">
+        <p className="text-slate-500 text-lg sm:text-2xl">Ordinary cameras. Extraordinary protection.</p>
+        <p className="text-slate-400 text-sm sm:text-xl mt-1">
           Clinically-validated head impact detection for football
         </p>
       </div>
@@ -80,11 +73,11 @@ export default function UploadScreen({ onUploaded, onDemoLoaded }: Props) {
       {/* Drop zone */}
       <div
         className={`
-          w-full max-w-lg border-2 border-dashed rounded-2xl p-16 text-center
+          w-full max-w-lg border-2 border-dashed rounded-2xl p-16 sm:p-20 text-center
           cursor-pointer transition-all duration-200 select-none
           ${dragOver
-            ? 'border-blue-500 bg-blue-950/30'
-            : 'border-slate-700 bg-slate-900 hover:border-slate-500 hover:bg-slate-800/50'}
+            ? 'border-blue-500 bg-blue-50'
+            : 'border-slate-300 bg-white hover:border-slate-400 hover:bg-slate-50'}
           ${busy ? 'pointer-events-none opacity-50' : ''}
         `}
         onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
@@ -99,14 +92,14 @@ export default function UploadScreen({ onUploaded, onDemoLoaded }: Props) {
           className="hidden"
           onChange={onFileChange}
         />
-        <Upload className="w-10 h-10 text-slate-500 mx-auto mb-4" />
+        <Upload className="w-10 h-10 sm:w-16 sm:h-16 text-slate-400 mx-auto mb-4" />
         {uploading ? (
-          <p className="text-blue-400 font-medium">Uploading video…</p>
+          <p className="text-blue-500 font-medium sm:text-2xl">Uploading video…</p>
         ) : (
           <>
-            <p className="text-slate-200 text-lg font-medium">Drop your video here</p>
-            <p className="text-slate-500 mt-2 text-sm">or click to browse</p>
-            <p className="text-slate-600 text-xs mt-3">MP4 · AVI · MOV · MKV</p>
+            <p className="text-slate-700 text-lg sm:text-2xl font-medium">Drop your video here</p>
+            <p className="text-slate-400 mt-2 text-sm sm:text-xl">or click to browse</p>
+            <p className="text-slate-400 text-xs sm:text-lg mt-3">MP4 · AVI · MOV · MKV</p>
           </>
         )}
       </div>
@@ -116,24 +109,23 @@ export default function UploadScreen({ onUploaded, onDemoLoaded }: Props) {
         onClick={loadDemo}
         disabled={busy}
         className="
-          mt-6 px-6 py-3 rounded-xl border border-slate-700 text-slate-400 text-sm
-          hover:border-blue-500 hover:text-blue-400 transition-colors disabled:opacity-40
-          flex items-center gap-2
+          mt-6 px-6 py-3 sm:px-10 sm:py-5 rounded-xl border border-slate-300 text-slate-500 text-sm sm:text-xl
+          hover:border-blue-500 hover:text-blue-500 transition-colors disabled:opacity-40
+          flex items-center gap-2 bg-white
         "
       >
         {loadingDemo ? (
           <span>Loading demo…</span>
         ) : (
           <>
-            <Zap className="w-4 h-4" />
             Load Example Data
           </>
         )}
       </button>
-      <p className="text-slate-600 text-xs mt-2">Instant demo — no processing required</p>
+      <p className="text-slate-400 text-xs sm:text-lg mt-2">Runs the full pipeline on a sample football clip</p>
 
       {error && (
-        <p className="mt-4 text-red-400 text-sm bg-red-950/30 border border-red-800 rounded-lg px-4 py-2">
+        <p className="mt-4 text-red-600 text-sm sm:text-xl bg-red-50 border border-red-200 rounded-lg px-4 py-2">
           {error}
         </p>
       )}

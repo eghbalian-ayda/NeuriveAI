@@ -16,8 +16,11 @@ from collections import defaultdict
 import numpy as np
 
 
-CONFIDENCE_THRESHOLD = 0.25   # minimum to record as impact event
-MIN_STAGES_REQUIRED  = 2      # at least 2 stages must fire
+CONFIDENCE_THRESHOLD  = 0.30   # minimum to record as impact event
+MIN_STAGES_REQUIRED   = 2      # at least 2 stages must fire
+REQUIRE_VELOCITY      = True   # velocity must be one of the fired stages
+                               # prevents proximity+rotation false positives
+                               # from players walking past each other
 
 
 @dataclass
@@ -42,9 +45,11 @@ class ImpactBuffer:
         self,
         confidence_threshold: float = CONFIDENCE_THRESHOLD,
         min_stages: int = MIN_STAGES_REQUIRED,
+        require_velocity: bool = REQUIRE_VELOCITY,
     ):
-        self.conf_thresh = confidence_threshold
-        self.min_stages  = min_stages
+        self.conf_thresh      = confidence_threshold
+        self.min_stages       = min_stages
+        self.require_velocity = require_velocity
 
         # cooldown tracker: pair_key → last_event_frame
         self._cooldowns: dict[str, int] = {}
@@ -116,6 +121,8 @@ class ImpactBuffer:
                 conf += skull_contrib
 
             if len(stages_fired) < self.min_stages:
+                continue
+            if self.require_velocity and "velocity" not in stages_fired:
                 continue
             if conf < self.conf_thresh:
                 continue

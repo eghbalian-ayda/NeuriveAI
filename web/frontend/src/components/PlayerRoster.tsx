@@ -37,18 +37,18 @@ export default function PlayerRoster({ players, fps, highlightedTracks, data, on
   const openPlayer = players.find(p => p.trackId === openPlayerId) ?? null
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col md:h-full">
       {/* Header */}
       <div className="flex items-center gap-2 mb-4">
-        <Users className="w-4 h-4 text-slate-400" />
-        <h3 className="text-slate-200 font-semibold text-sm">Players Involved</h3>
-        <span className="ml-auto text-slate-600 text-xs">{players.length} player{players.length !== 1 ? 's' : ''}</span>
+        <Users className="w-4 h-4 sm:w-6 sm:h-6 text-slate-400" />
+        <h3 className="text-slate-700 font-semibold text-sm sm:text-xl">Players Involved</h3>
+        <span className="ml-auto text-slate-400 text-xs sm:text-base">{players.length} player{players.length !== 1 ? 's' : ''}</span>
       </div>
 
       {/* Player cards */}
-      <div className="flex flex-col gap-2 flex-1 overflow-y-auto scrollbar-thin pr-1">
+      <div className="flex flex-col gap-2 sm:gap-3 flex-1 max-h-[50vh] md:max-h-none overflow-y-auto scrollbar-thin pr-1">
         {players.length === 0 ? (
-          <p className="text-slate-600 text-sm text-center mt-8">No impacts detected</p>
+          <p className="text-slate-400 text-sm sm:text-xl text-center mt-8">No impacts detected</p>
         ) : (
           players.map((player) => {
             const hasRing = ringTracks.has(player.trackId)
@@ -57,28 +57,28 @@ export default function PlayerRoster({ players, fps, highlightedTracks, data, on
                 key={player.trackId}
                 onClick={() => setOpenPlayerId(player.trackId)}
                 className={`
-                  w-full text-left bg-slate-900 rounded-xl p-4 border transition-all duration-150
-                  hover:bg-slate-800 hover:border-slate-600 group
+                  w-full text-left bg-white rounded-xl p-4 sm:p-5 border transition-all duration-150
+                  hover:bg-slate-50 hover:border-slate-300 group
                   ${hasRing
-                    ? 'border-blue-500 shadow-[0_0_0_3px_rgba(59,130,246,0.25)]'
-                    : 'border-slate-800'}
+                    ? 'border-blue-400 shadow-[0_0_0_3px_rgba(59,130,246,0.15)]'
+                    : 'border-slate-200'}
                 `}
               >
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <span className="text-2xl font-bold text-white">#{player.trackId}</span>
+                    <span className="text-2xl sm:text-4xl font-bold text-slate-900">#{player.trackId}</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <span className={`
-                      px-2 py-0.5 rounded-full text-xs font-bold
+                      px-2 py-0.5 sm:px-3 sm:py-1.5 rounded-full text-xs sm:text-base font-bold
                       ${riskBg(player.highestRisk)} text-white
                     `}>
                       {player.highestRisk}
                     </span>
-                    <ChevronRight className="w-4 h-4 text-slate-600 group-hover:text-slate-400 transition-colors" />
+                    <ChevronRight className="w-4 h-4 sm:w-6 sm:h-6 text-slate-400 group-hover:text-slate-600 transition-colors" />
                   </div>
                 </div>
-                <p className={`text-xs mt-1 ${riskText(player.highestRisk)}`}>
+                <p className={`text-xs sm:text-base mt-1 ${riskText(player.highestRisk)}`}>
                   {player.impactCount} impact{player.impactCount !== 1 ? 's' : ''} detected
                 </p>
               </button>
@@ -88,17 +88,17 @@ export default function PlayerRoster({ players, fps, highlightedTracks, data, on
       </div>
 
       {/* Export */}
-      <div className="mt-4 pt-4 border-t border-slate-800">
+      <div className="mt-4 pt-4 border-t border-slate-200">
         <button
           onClick={exportJson}
           className="
-            w-full flex items-center justify-center gap-2 py-2.5 rounded-xl
-            border border-slate-700 text-slate-400 text-sm
-            hover:border-slate-500 hover:text-slate-200 transition-colors
+            w-full flex items-center justify-center gap-2 py-2.5 sm:py-4 rounded-xl
+            border border-slate-300 text-slate-500 text-sm sm:text-xl bg-white
+            hover:border-slate-400 hover:text-slate-700 transition-colors
           "
         >
-          <Download className="w-4 h-4" />
-          Export Report JSON
+          <Download className="w-4 h-4 sm:w-6 sm:h-6" />
+          Export Report
         </button>
       </div>
 

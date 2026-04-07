@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Zap, X } from 'lucide-react'
+import { X } from 'lucide-react'
 import type { ResultsData } from '@/types/impact'
 
 type Stage = 'uploading' | 'pass1' | 'pass2' | 'rendering' | 'complete' | 'error'
@@ -36,7 +36,10 @@ export default function ProcessingScreen({ jobId, onComplete, onCancel }: Props)
       const data = JSON.parse(e.data) as { stage: Stage; progress: number; message: string }
       setStage(data.stage)
       setProgress(data.progress)
-      if (data.message) setLogLines(prev => [...prev.slice(-99), data.message])
+      if (data.message) setLogLines(prev => {
+        if (prev.length > 0 && prev[prev.length - 1] === data.message) return prev
+        return [...prev.slice(-99), data.message]
+      })
 
       if (data.stage === 'complete') {
         es.close()
@@ -78,18 +81,16 @@ export default function ProcessingScreen({ jobId, onComplete, onCancel }: Props)
   const currentStageIdx = STAGE_ORDER.indexOf(stage)
 
   return (
-    <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-8">
+    <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-8">
       <div className="w-full max-w-xl">
         {/* Header */}
         <div className="flex items-center gap-3 mb-10">
-          <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center">
-            <Zap className="w-5 h-5 text-white" />
-          </div>
-          <span className="text-white font-semibold text-lg">NeuriveAI</span>
+          <img src="/logo.png" alt="NeuriveAI logo" className="w-8 h-8 sm:w-12 sm:h-12 object-contain" />
+          <span className="text-slate-900 font-semibold text-lg sm:text-2xl">NeuriveAI</span>
         </div>
 
-        <h2 className="text-2xl font-bold text-white mb-2">Analyzing video…</h2>
-        <p className="text-slate-400 text-sm mb-8">
+        <h2 className="text-2xl sm:text-4xl font-bold text-slate-900 mb-2">Analyzing video…</h2>
+        <p className="text-slate-500 text-sm sm:text-xl mb-8">
           Two-pass pipeline: fast scan + clinical brain analysis
         </p>
 
@@ -103,10 +104,10 @@ export default function ProcessingScreen({ jobId, onComplete, onCancel }: Props)
               <span
                 key={s}
                 className={`
-                  px-3 py-1.5 rounded-full text-xs font-semibold transition-colors
+                  px-3 py-1.5 sm:px-5 sm:py-3 rounded-full text-xs sm:text-base font-semibold transition-colors
                   ${isActive  ? 'bg-blue-600 text-white'
-                  : isDone    ? 'bg-green-700 text-green-100'
-                              : 'bg-slate-800 text-slate-500'}
+                  : isDone    ? 'bg-green-100 text-green-700'
+                              : 'bg-slate-200 text-slate-400'}
                 `}
               >
                 {i + 1}. {STAGE_LABELS[s]}
@@ -116,20 +117,20 @@ export default function ProcessingScreen({ jobId, onComplete, onCancel }: Props)
         </div>
 
         {/* Progress bar */}
-        <div className="w-full bg-slate-800 rounded-full h-2 mb-2 overflow-hidden">
+        <div className="w-full bg-slate-200 rounded-full h-2 mb-2 overflow-hidden">
           <div
             className="h-2 rounded-full transition-all duration-700 bg-blue-500"
             style={{ width: `${progress}%` }}
           />
         </div>
-        <p className="text-slate-500 text-xs text-right mb-6">{progress}%</p>
+        <p className="text-slate-400 text-xs sm:text-base text-right mb-6">{progress}%</p>
 
         {/* Log */}
         <pre
           ref={logRef}
           className="
-            w-full bg-slate-900 border border-slate-800 text-slate-400 text-xs font-mono
-            rounded-xl p-4 h-48 overflow-y-auto scrollbar-thin whitespace-pre-wrap break-all
+            w-full bg-white border border-slate-200 text-slate-600 text-xs sm:text-base font-mono
+            rounded-xl p-4 h-48 sm:h-60 overflow-y-auto scrollbar-thin whitespace-pre-wrap break-all
           "
         >
           {logLines.join('\n') || 'Waiting for output…'}
@@ -137,7 +138,7 @@ export default function ProcessingScreen({ jobId, onComplete, onCancel }: Props)
 
         {/* Error state */}
         {stage === 'error' && (
-          <div className="mt-4 p-3 bg-red-950/40 border border-red-800 rounded-lg text-red-400 text-sm">
+          <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm sm:text-xl">
             Pipeline error. Check the log above for details.
           </div>
         )}
@@ -146,9 +147,9 @@ export default function ProcessingScreen({ jobId, onComplete, onCancel }: Props)
         <div className="mt-6 flex justify-center">
           <button
             onClick={cancel}
-            className="flex items-center gap-2 text-slate-500 hover:text-red-400 text-sm transition-colors"
+            className="flex items-center gap-2 text-slate-400 hover:text-red-500 text-sm sm:text-xl transition-colors"
           >
-            <X className="w-4 h-4" />
+            <X className="w-4 h-4 sm:w-6 sm:h-6" />
             Cancel
           </button>
         </div>

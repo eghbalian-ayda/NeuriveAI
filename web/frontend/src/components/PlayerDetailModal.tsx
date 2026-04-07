@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { X, Play } from 'lucide-react'
 import {
@@ -6,6 +7,8 @@ import {
 } from 'recharts'
 import type { ImpactEvent, PlayerCard } from '@/types/impact'
 import { frameToTimecode, riskBg, riskText } from '@/lib/utils'
+
+const BrainVisualization = lazy(() => import('./BrainVisualization'))
 
 interface Props {
   player: PlayerCard
@@ -19,13 +22,13 @@ interface Props {
 function MetricCell({ label, value, unit, risk }: {
   label: string; value: number; unit: string; risk?: string
 }) {
-  const textClass = risk === 'HIGH' ? 'text-red-400' : risk === 'ELEVATED' ? 'text-amber-400' : 'text-white'
+  const textClass = risk === 'HIGH' ? 'text-red-500' : risk === 'ELEVATED' ? 'text-amber-500' : 'text-slate-900'
   return (
-    <div className="bg-slate-950 rounded-lg p-3 text-center">
-      <p className={`text-base font-bold font-mono ${textClass}`}>
+    <div className="bg-gray-50 rounded-lg p-3 text-center">
+      <p className={`text-base sm:text-2xl font-bold font-mono ${textClass}`}>
         {value.toFixed(value < 10 ? 4 : 1)}{unit}
       </p>
-      <p className="text-slate-500 text-[10px] mt-0.5">{label}</p>
+      <p className="text-slate-400 text-[10px] sm:text-base mt-0.5">{label}</p>
     </div>
   )
 }
@@ -38,28 +41,28 @@ export default function PlayerDetailModal({ player, fps, events, onClose, onSeek
   return (
     <Dialog.Root open onOpenChange={(open) => { if (!open) onClose() }}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 bg-black/60 backdrop-blur-sm z-40 animate-fade-in" />
+        <Dialog.Overlay className="fixed inset-0 bg-black/40 backdrop-blur-sm z-40 animate-fade-in" />
         <Dialog.Content
           className="
-            fixed inset-y-4 right-4 left-4 md:left-auto md:w-[520px]
-            bg-slate-900 border border-slate-700 rounded-2xl z-50
+            fixed inset-0 md:inset-y-4 md:right-4 md:left-auto md:w-[520px]
+            bg-white border border-slate-200 rounded-none md:rounded-2xl z-50
             flex flex-col shadow-2xl animate-fade-in overflow-hidden
           "
         >
           {/* Header */}
-          <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800">
+          <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
             <div>
-              <Dialog.Title className="text-white font-bold text-lg">
+              <Dialog.Title className="text-slate-900 font-bold text-lg sm:text-2xl">
                 Player #{player.trackId}
               </Dialog.Title>
-              <Dialog.Description className="text-slate-400 text-sm">
+              <Dialog.Description className="text-slate-500 text-sm sm:text-lg">
                 {player.impactCount} impact{player.impactCount !== 1 ? 's' : ''} · Highest risk:{' '}
                 <span className={riskText(player.highestRisk)}>{player.highestRisk}</span>
               </Dialog.Description>
             </div>
             <Dialog.Close asChild>
-              <button className="text-slate-500 hover:text-slate-200 transition-colors p-1 rounded-lg hover:bg-slate-800">
-                <X className="w-5 h-5" />
+              <button className="text-slate-400 hover:text-slate-700 transition-colors p-1 rounded-lg hover:bg-slate-100">
+                <X className="w-5 h-5 sm:w-7 sm:h-7" />
               </button>
             </Dialog.Close>
           </div>
@@ -76,14 +79,14 @@ export default function PlayerDetailModal({ player, fps, events, onClose, onSeek
               return (
                 <div
                   key={i}
-                  className="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden"
+                  className="bg-slate-50 rounded-xl border border-slate-200 overflow-hidden"
                 >
                   {/* Impact header */}
-                  <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700">
+                  <div className="flex items-center justify-between px-4 py-3 sm:px-5 sm:py-4 border-b border-slate-200">
                     <div className="flex items-center gap-3">
-                      <span className="text-slate-200 font-mono text-sm font-semibold">{timecode}</span>
+                      <span className="text-slate-700 font-mono text-sm sm:text-lg font-semibold">{timecode}</span>
                       <span className={`
-                        px-2 py-0.5 rounded-full text-xs font-bold
+                        px-2 py-0.5 sm:px-3 sm:py-1 rounded-full text-xs sm:text-sm font-bold
                         ${riskBg(profile.risk_summary)} text-white
                       `}>
                         {profile.risk_summary}
@@ -92,19 +95,19 @@ export default function PlayerDetailModal({ player, fps, events, onClose, onSeek
                     <button
                       onClick={() => onSeek(profile.event_frame)}
                       className="
-                        flex items-center gap-1.5 px-3 py-1.5 rounded-lg
-                        bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium
+                        flex items-center gap-1.5 px-3 py-1.5 sm:px-5 sm:py-3 rounded-lg
+                        bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-base font-medium
                         transition-colors
                       "
                     >
-                      <Play className="w-3 h-3" />
+                      <Play className="w-3 h-3 sm:w-4 sm:h-4" />
                       Seek to {timecode}
                     </button>
                   </div>
 
-                  <div className="p-4 space-y-4">
+                  <div className="p-4 sm:p-5 space-y-4">
                     {/* Metrics grid */}
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="grid grid-cols-3 gap-2 sm:gap-3">
                       <MetricCell
                         label="ω peak (rad/s)"
                         value={profile.omega_peak_rad_s}
@@ -142,19 +145,19 @@ export default function PlayerDetailModal({ player, fps, events, onClose, onSeek
 
                     {/* Detection stage pills */}
                     {event && (
-                      <div className="flex flex-wrap gap-1.5">
+                      <div className="flex flex-wrap gap-1.5 sm:gap-2">
                         {event.stages.map(stage => (
                           <span
                             key={stage}
                             className="
-                              px-2 py-0.5 bg-blue-950 border border-blue-800
-                              text-blue-300 rounded-full text-[10px] font-mono uppercase
+                              px-2 py-0.5 sm:px-3 sm:py-1 bg-blue-50 border border-blue-200
+                              text-blue-600 rounded-full text-[10px] sm:text-sm font-mono uppercase
                             "
                           >
                             {stage.replace('_', ' ')}
                           </span>
                         ))}
-                        <span className="px-2 py-0.5 bg-slate-700 text-slate-400 rounded-full text-[10px]">
+                        <span className="px-2 py-0.5 sm:px-3 sm:py-1 bg-slate-100 text-slate-500 rounded-full text-[10px] sm:text-sm">
                           conf: {Math.round(event.confidence * 100)}%
                         </span>
                       </div>
@@ -163,31 +166,31 @@ export default function PlayerDetailModal({ player, fps, events, onClose, onSeek
                     {/* Sparkline */}
                     {chartData.length > 1 && (
                       <div>
-                        <p className="text-slate-500 text-[10px] mb-1.5 uppercase tracking-wide">
+                        <p className="text-slate-400 text-[10px] sm:text-sm mb-1.5 uppercase tracking-wide">
                           Angular velocity ‖ω‖ over impact window
                         </p>
-                        <div className="h-20">
+                        <div className="h-20 sm:h-32">
                           <ResponsiveContainer width="100%" height="100%">
                             <AreaChart data={chartData} margin={{ top: 4, right: 4, bottom: 0, left: 0 }}>
                               <defs>
                                 <linearGradient id={`omegaGrad-${i}`} x1="0" y1="0" x2="0" y2="1">
-                                  <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
+                                  <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.2} />
                                   <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
                                 </linearGradient>
                               </defs>
                               <XAxis dataKey="t" hide />
                               <YAxis
-                                tick={{ fontSize: 9, fill: '#64748b' }}
-                                width={28}
+                                tick={{ fontSize: 11, fill: '#94a3b8' }}
+                                width={32}
                                 tickLine={false}
                                 axisLine={false}
                               />
                               <ReTooltip
                                 contentStyle={{
-                                  background: '#1e293b',
-                                  border: '1px solid #334155',
+                                  background: '#ffffff',
+                                  border: '1px solid #e2e8f0',
                                   borderRadius: '8px',
-                                  fontSize: '11px',
+                                  fontSize: '13px',
                                   padding: '4px 8px',
                                 }}
                                 formatter={(v: number) => [`${v.toFixed(3)} rad/s`, '‖ω‖']}
@@ -211,12 +214,39 @@ export default function PlayerDetailModal({ player, fps, events, onClose, onSeek
                             </AreaChart>
                           </ResponsiveContainer>
                         </div>
-                        <p className="text-slate-600 text-[9px] text-right mt-0.5">
+                        <p className="text-slate-400 text-[9px] sm:text-xs text-right mt-0.5">
                           red dashed = peak ({peakOmega.toFixed(2)} rad/s)
                         </p>
                       </div>
                     )}
                   </div>
+
+                  {/* 3D Brain Impact Map */}
+                  {profile.regional_tbi_probs && (
+                    <div className="border-t border-slate-200 overflow-hidden">
+                      <div className="flex items-center justify-between px-4 py-2 sm:px-5 sm:py-3 bg-slate-100">
+                        <span className="text-[10px] sm:text-sm text-slate-500 font-medium uppercase tracking-wide">
+                          Brain Region Impact Map
+                        </span>
+                        {profile.tbi_probability_pct !== undefined && (
+                          <span className="text-[10px] sm:text-sm font-mono font-bold text-slate-600">
+                            {profile.tbi_probability_pct.toFixed(1)}% TBI probability
+                          </span>
+                        )}
+                      </div>
+                      <Suspense fallback={
+                        <div className="aspect-square w-[80%] max-w-[375px] mx-auto bg-slate-50 flex items-center justify-center">
+                          <div className="w-10 h-10 rounded-full border border-slate-300 border-t-blue-400 animate-spin" />
+                        </div>
+                      }>
+                        <BrainVisualization
+                          regionalProbs={profile.regional_tbi_probs}
+                          omegaMagnitudes={profile.omega_magnitudes}
+                          omegaUnitVectors={profile.omega_unit_vectors}
+                        />
+                      </Suspense>
+                    </div>
+                  )}
                 </div>
               )
             })}

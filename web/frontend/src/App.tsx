@@ -16,12 +16,6 @@ export default function App() {
     setPhase('processing')
   }
 
-  function handleDemoLoaded(data: ResultsData, id: string) {
-    setJobId(id)
-    setResultsData(data)
-    setPhase('results')
-  }
-
   function handleProcessingComplete(data: ResultsData) {
     setResultsData(data)
     setPhase('results')
@@ -38,7 +32,6 @@ export default function App() {
       {phase === 'upload' && (
         <UploadScreen
           onUploaded={handleUploaded}
-          onDemoLoaded={handleDemoLoaded}
         />
       )}
       {phase === 'processing' && (

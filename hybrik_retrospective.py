@@ -11,6 +11,7 @@ HybrIK outputs:
 """
 
 from __future__ import annotations
+import os
 import sys
 from pathlib import Path
 import numpy as np
@@ -47,8 +48,11 @@ class HybrIKRetrospective:
                 "256x192_adam_lr1e-3-hrw48_cam_2x_w_pw3d_3dhp.yaml"
             )
 
+        _cwd = os.getcwd()
+        os.chdir(HYBRIK_ROOT)
         cfg = update_config(cfg_file)
         self.model = hybrik_builder.build_sppe(cfg.MODEL)
+        os.chdir(_cwd)
 
         ckpt_path  = Path(__file__).parent / ckpt
         state      = torch.load(str(ckpt_path), map_location=device)

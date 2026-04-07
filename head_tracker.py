@@ -140,6 +140,7 @@ class HeadKeypointTracker:
                 persist=True,
                 tracker="bytetrack.yaml",
                 conf=self.det_conf,
+                # imgsz=1920,
                 verbose=False,
                 classes=[0],    # person only
             )[0]
