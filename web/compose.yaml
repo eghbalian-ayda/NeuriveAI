@@ -1,0 +1,24 @@
+services:
+  neurive-web:
+    build:
+      context: ..                        # repo root
+      dockerfile: web/backend/Dockerfile # multi-stage: Node builds frontend, python:3.10-slim serves
+    image: neurive-web:latest
+    ports:
+      - "8000:8000"
+    environment:
+      # host.containers.internal resolves to the Podman host (where model server runs)
+      - MODEL_SERVER_URL=http://host.containers.internal:8001
+      - UPLOADS_DIR=/app/web/uploads
+      # PIPELINE_DIR is the pipeline repo root, used only for demo video path resolution
+      - PIPELINE_DIR=/app/pipeline
+    volumes:
+      # Bind mount so the host model server and Docker backend share the same upload directory
+      - /workspace/storage/NeuriveAI/web/uploads:/app/web/uploads
+      # Repo root (read-only) — needed to serve demo video files
+      - /workspace/storage/NeuriveAI:/app/pipeline:ro
+    # No GPU config — all GPU work happens in the model server on the host
+    extra_hosts:
+      # Ensures host.containers.internal resolves correctly on Linux with Podman
+      - "host.containers.internal:host-gateway"
+    restart: unless-stopped

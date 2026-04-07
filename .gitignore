@@ -22,5 +22,11 @@ runs/
 # HuggingFace cache
 .cache/
 
+# Web prototype
+web/frontend/node_modules/
+web/frontend/dist/
+web/backend/uploads/
+web/backend/static/
+
 # OS
 .DS_Store

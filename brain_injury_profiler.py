@@ -26,6 +26,29 @@ from __future__ import annotations
 import numpy as np
 from scipy.signal import savgol_filter
 from scipy.linalg import logm
+from scipy.special import expit as _sigmoid
+from strain_estimator import StrainEstimator
+
+# ── Regional TBI risk curves (logistic model) ─────────────────────────────
+# P(injury) = sigmoid(β0 + β1 × MPS); calibrated at 50%-risk MPS thresholds
+# from Kleiven 2007 / Giordano & Kleiven 2014 / Patton 2015.
+_RISK_CURVES: dict[str, tuple[float, float]] = {
+    "corpus_callosum": (-5.0,  25.0),   # 50% at MPS=0.20
+    "brainstem":       (-6.0,  25.0),   # 50% at MPS=0.24
+    "thalamus":        (-5.5,  25.0),   # 50% at MPS=0.22
+    "white_matter":    (-6.75, 25.0),   # 50% at MPS=0.27
+    "grey_matter":     (-8.0,  25.0),   # 50% at MPS=0.32
+    "cerebellum":      (-7.5,  25.0),   # 50% at MPS=0.30
+}
+_REGION_W: dict[str, float] = {
+    "corpus_callosum": 0.30,
+    "brainstem":       0.25,
+    "thalamus":        0.20,
+    "white_matter":    0.12,
+    "grey_matter":     0.08,
+    "cerebellum":      0.05,
+}
+_strain_estimator = StrainEstimator()   # CNN weights optional; falls back gracefully
 
 # BrIC_R critical value — resultant, direction-independent (Takhounts 2013)
 BRIC_OMEGA_CRIT_R = 53.0   # rad/s  → BrIC_R = 1.0 at 50% AIS2+ risk
@@ -43,6 +66,7 @@ def _rot_to_rotvec(R: np.ndarray) -> np.ndarray:
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         log_R = logm(R)
+    log_R = np.array(log_R).real
     rvec = np.array([log_R[2, 1], log_R[0, 2], log_R[1, 0]], dtype=np.float64)
     return rvec.real
 
@@ -272,4 +296,34 @@ class BrainInjuryProfiler:
             "damage":                round(damage,   4),
             "damage_risk":           damage_risk,
             "risk_summary":          overall,
+
+            # ── regional brain strain & TBI probabilities ──────────────────
+            **self._regional_brain_probs(omega, damage),
+        }
+
+    # ─────────────────────────────────────────────────────────────────────────
+    def _regional_brain_probs(
+        self,
+        omega:  np.ndarray,   # (T, 3) rad/s
+        damage: float,
+    ) -> dict:
+        """
+        Estimate per-region TBI probabilities using StrainEstimator (fallback
+        mode is always available) + logistic risk curves from literature.
+        Returned keys are JSON-serializable floats.
+        """
+        regional_mps = _strain_estimator.estimate(omega, damage_score=damage)
+
+        regional_tbi: dict[str, float] = {}
+        for region, (b0, b1) in _RISK_CURVES.items():
+            mps  = regional_mps.get(region, 0.0)
+            prob = float(_sigmoid(b0 + b1 * mps)) * 100.0
+            regional_tbi[region] = round(prob, 1)
+
+        overall_tbi = sum(
+            regional_tbi[r] * w for r, w in _REGION_W.items()
+        )
+        return {
+            "regional_tbi_probs":  regional_tbi,
+            "tbi_probability_pct": round(overall_tbi, 1),
         }

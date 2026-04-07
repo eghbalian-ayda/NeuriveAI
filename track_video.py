@@ -259,9 +259,52 @@ def run(video_path: str, half_window: int = HALF_WINDOW, show: bool = False):
     writer.release()
     print(f"[Render] Saved to: {out_path}")
 
+    # ── build impact-window tracking data ─────────────────────────────────────
+    # Only export head tracking for frames within ±half_window of each impact event.
+    window_frames: set[int] = set()
+    for ev in all_events:
+        for offset in range(-half_window, half_window + 1):
+            window_frames.add(ev.frame_idx + offset)
+
+    tracking: dict[str, list[dict]] = {}
+    for fidx in sorted(window_frames):
+        heads = all_frame_states.get(fidx, [])
+        if not heads:
+            continue
+        serialized = []
+        for hs in heads:
+            kp_list = []
+            for kp in hs.keypoints:   # 5 rows: nose, L-eye, R-eye, L-ear, R-ear
+                if float(kp[2]) > KP_CONF_THRESH:
+                    kp_list.append([
+                        round(float(kp[0]), 1),
+                        round(float(kp[1]), 1),
+                        round(float(kp[2]), 3),
+                    ])
+                else:
+                    kp_list.append(None)  # preserve index; serializes as JSON null
+            serialized.append({
+                "id": int(hs.track_id),
+                "cx": round(float(hs.centroid[0]), 1),
+                "cy": round(float(hs.centroid[1]), 1),
+                "r":  round(float(hs.radius_px), 1),
+                "kp": kp_list,
+            })
+        tracking[str(fidx)] = serialized
+
     # ── save JSON report ───────────────────────────────────────────────────────
     all_reports = [r for tid_map in reports_by_event.values() for r in tid_map.values()]
     json_path   = str(Path(video_path).with_suffix("")) + ".impact_report.json"
+    class _NumpyEncoder(json.JSONEncoder):
+        def default(self, o):
+            if isinstance(o, np.floating):
+                return float(o)
+            if isinstance(o, np.integer):
+                return int(o)
+            if isinstance(o, np.ndarray):
+                return o.tolist()
+            return super().default(o)
+
     with open(json_path, "w") as f:
         json.dump({
             "events": [
@@ -271,7 +314,8 @@ def run(video_path: str, half_window: int = HALF_WINDOW, show: bool = False):
                 for ev in all_events
             ],
             "profiles": all_reports,
-        }, f, indent=2)
+            "tracking": tracking,
+        }, f, indent=2, cls=_NumpyEncoder)
 
     print(f"[Done]   Report saved to: {json_path}\n")
     return all_reports

@@ -1,0 +1,13 @@
+web/frontend/node_modules/
+web/frontend/dist/
+web/backend/uploads/
+web/backend/static/
+*.mp4
+*.avi
+*.mov
+*.png
+*.jpg
+yolov8x-pose.pt
+__pycache__/
+*.pyc
+.git/
